@@ -44,6 +44,7 @@ class ProcessingJobResponse(BaseModel):
     status: str
     progress: float
     stage_message: Optional[str] = None
+    timing_metrics: Optional[Dict[str, Any]] = None
     error_code: Optional[str] = None
     error_message: Optional[str] = None
     created_at: datetime
@@ -189,6 +190,8 @@ class GenerateSubtitlesRequest(BaseModel):
     asr_model: Optional[str] = "tiny"
     max_chars_per_line: Optional[int] = 42
     max_lines: Optional[int] = 2
+    beam_size: Optional[int] = 5
+    word_timestamps: Optional[bool] = True
 
 # --- Export Schemas ---
 class SubtitleStylingConfig(BaseModel):

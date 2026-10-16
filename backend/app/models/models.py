@@ -104,6 +104,7 @@ class ProcessingJob(Base):
     retry_count = Column(Integer, default=0)
     
     stage_message = Column(String(255), nullable=True)
+    timing_metrics = Column(JSON, nullable=True)
     
     created_at = Column(DateTime, default=get_utc_now)
     started_at = Column(DateTime, nullable=True)

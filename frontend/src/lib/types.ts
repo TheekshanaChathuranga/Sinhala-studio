@@ -118,6 +118,7 @@ export interface ProcessingJob {
   status: 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled';
   progress: number;
   stage_message?: string | null;
+  timing_metrics?: Record<string, any>;
   error_code?: string | null;
   error_message?: string | null;
   created_at: string;

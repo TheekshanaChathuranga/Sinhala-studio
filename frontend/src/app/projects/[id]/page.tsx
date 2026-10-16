@@ -7,6 +7,7 @@ import Link from 'next/link';
 
 import {
   getProject,
+  getJobStatus,
   updateCue,
   addCue,
   deleteCue,
@@ -67,6 +68,10 @@ export default function SinhalaStudioEditorPage() {
   // Editor states
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isGeneratingSubtitles, setIsGeneratingSubtitles] = useState<boolean>(false);
+  const [subtitlesJobStatus, setSubtitlesJobStatus] = useState<string>('idle');
+  const [subtitlesJobProgress, setSubtitlesJobProgress] = useState<number>(0);
+  const [subtitlesJobMessage, setSubtitlesJobMessage] = useState<string>('');
+  const [subtitlesMetrics, setSubtitlesMetrics] = useState<Record<string, any> | undefined>(undefined);
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved');
   const [isExportOpen, setIsExportOpen] = useState<boolean>(false);
 
@@ -389,27 +394,50 @@ export default function SinhalaStudioEditorPage() {
     );
   };
 
-  // Generate Subtitles AI Pipeline
+  // Generate Subtitles AI Pipeline with Real-Time Progress & Telemetry
   const handleGenerateSubtitles = async () => {
     setIsGeneratingSubtitles(true);
+    setSubtitlesJobStatus('processing');
+    setSubtitlesJobProgress(10);
+    setSubtitlesJobMessage('Initializing AI pipeline...');
+
     try {
-      await generateSubtitles(projectId, {
-        source_language: project?.source_language || 'auto',
+      const job = await generateSubtitles(projectId, {
+        source_language: project?.source_language || 'si',
         target_language: 'si',
         translation_style: project?.translation_style || 'conversational',
       });
 
-      // Poll until ready
+      // Poll job progress every 700ms
       const interval = setInterval(async () => {
-        const updated = await getProject(projectId);
-        if (updated.status === 'ready' || (updated.cues && updated.cues.length > 0)) {
-          clearInterval(interval);
-          setCues(updated.cues || []);
-          setIsGeneratingSubtitles(false);
+        try {
+          const jobUpdate = await getJobStatus(job.id);
+          setSubtitlesJobProgress(jobUpdate.progress || 10);
+          setSubtitlesJobMessage(jobUpdate.stage_message || 'Processing audio...');
+
+          if (jobUpdate.status === 'completed' || jobUpdate.status === 'failed') {
+            clearInterval(interval);
+            setIsGeneratingSubtitles(false);
+            setSubtitlesJobStatus(jobUpdate.status);
+
+            if (jobUpdate.timing_metrics) {
+              setSubtitlesMetrics(jobUpdate.timing_metrics);
+            }
+
+            if (jobUpdate.status === 'completed') {
+              const updatedProject = await getProject(projectId);
+              setCues(updatedProject.cues || []);
+            } else if (jobUpdate.status === 'failed') {
+              alert(jobUpdate.error_message || 'Subtitle generation failed');
+            }
+          }
+        } catch (e) {
+          console.error('Job polling error:', e);
         }
-      }, 2500);
+      }, 700);
     } catch (err: any) {
       setIsGeneratingSubtitles(false);
+      setSubtitlesJobStatus('failed');
       alert(err.message || 'Failed to start AI subtitle generation.');
     }
   };
@@ -486,6 +514,10 @@ export default function SinhalaStudioEditorPage() {
           assets={assets}
           cues={cues}
           isGeneratingSubtitles={isGeneratingSubtitles}
+          subtitlesJobStatus={subtitlesJobStatus}
+          subtitlesJobProgress={subtitlesJobProgress}
+          subtitlesJobMessage={subtitlesJobMessage}
+          subtitlesMetrics={subtitlesMetrics}
           onUploadAsset={handleUploadAsset}
           onDeleteAsset={handleDeleteAsset}
           onAddAssetToTimeline={handleAddAssetToTimeline}

@@ -1,4 +1,5 @@
 import os
+import time
 import logging
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
@@ -9,6 +10,14 @@ from app.utils.ffmpeg_utils import extract_audio_to_wav, extract_media_metadata
 from app.services.asr_service import get_asr_service
 from app.services.segmentation_service import segment_transcription
 from app.services.translation_service import get_translation_provider
+from app.services.transcription_cache import (
+    compute_media_fingerprint,
+    get_cached_transcription,
+    set_cached_transcription,
+    get_cached_cues,
+    set_cached_cues,
+    _build_transcription_key
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,12 +40,21 @@ def run_pipeline_for_project(
     project_id: str,
     job_id: str,
     max_chars_per_line: int = 42,
-    max_lines: int = 2
+    max_lines: int = 2,
+    beam_size: int = 5,
+    word_timestamps: bool = True
 ) -> ProcessingJob:
     """
-    Executes the complete AI subtitle pipeline for a project:
-    Audio Extraction -> Speech Recognition -> Subtitle Segmentation -> Sinhala Translation -> DB Persistence.
+    Executes the optimized AI subtitle pipeline:
+    1. Media Inspection & Audio Fingerprinting
+    2. Cached Audio / FFmpeg Audio Extraction
+    3. Model Retrieval / Cache Lookup / ASR Inference
+    4. Subtitle Segmentation & Timestamp Alignment
+    5. Sinhala Unicode Normalization / Direct Mapping
+    6. Batch Database Persistence & Timing Telemetry
     """
+    t_start_total = time.perf_counter()
+
     job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
     project = db.query(Project).filter(Project.id == project_id).first()
 
@@ -51,27 +69,89 @@ def run_pipeline_for_project(
     media_path = str(settings.STORAGE_DIR / "uploads" / project.stored_filename)
     audio_wav_path = str(settings.STORAGE_DIR / "audio" / f"{project.id}.wav")
 
+    metrics = {
+        "media_duration_sec": 0.0,
+        "inspection_ms": 0.0,
+        "audio_extraction_ms": 0.0,
+        "audio_extraction_cached": False,
+        "asr_ms": 0.0,
+        "asr_cached": False,
+        "segmentation_ms": 0.0,
+        "translation_ms": 0.0,
+        "persistence_ms": 0.0,
+        "total_processing_ms": 0.0,
+        "real_time_factor": 0.0,
+        "speedup_factor": 0.0,
+        "model_name": settings.ASR_MODEL,
+        "device": settings.ASR_DEVICE,
+        "compute_type": settings.ASR_COMPUTE_TYPE
+    }
+
     try:
-        # Stage 1: Media Inspection & Audio Extraction
-        update_job_stage(db, job, "extracting_audio", 15.0, "Extracting audio track using FFmpeg...")
+        # --- Stage 1: Media Inspection & Fingerprinting ---
+        t0 = time.perf_counter()
+        update_job_stage(db, job, "inspecting_media", 10.0, "Inspecting media metadata and calculating fingerprint...")
         if not os.path.exists(media_path):
             raise FileNotFoundError(f"Media file {project.stored_filename} was not found on server.")
 
-        # Ensure metadata is updated
         metadata = extract_media_metadata(media_path)
-        if metadata.get("duration", 0) > 0 and project.media_duration == 0:
-            project.media_duration = metadata["duration"]
+        media_dur = metadata.get("duration", 0.0)
+        if media_dur > 0 and project.media_duration == 0:
+            project.media_duration = media_dur
+        metrics["media_duration_sec"] = project.media_duration
+        metrics["inspection_ms"] = round((time.perf_counter() - t0) * 1000, 2)
 
+        fingerprint = compute_media_fingerprint(media_path)
+
+        # --- Stage 2: Audio Extraction (with fresh cache verification) ---
+        t0 = time.perf_counter()
+        update_job_stage(db, job, "extracting_audio", 20.0, "Extracting audio track for transcription...")
+        is_audio_cached = os.path.exists(audio_wav_path) and os.path.getsize(audio_wav_path) > 1024
         extract_audio_to_wav(media_path, audio_wav_path)
-        update_job_stage(db, job, "audio_extracted", 25.0, "Audio extracted to 16kHz WAV successfully.")
+        metrics["audio_extraction_ms"] = round((time.perf_counter() - t0) * 1000, 2)
+        metrics["audio_extraction_cached"] = is_audio_cached
 
-        # Stage 2: Speech Recognition (ASR)
-        update_job_stage(db, job, "speech_recognition", 35.0, "Recognizing spoken speech with Whisper AI...")
-        asr = get_asr_service(provider=settings.ASR_PROVIDER, model_name=settings.ASR_MODEL)
-        
-        asr_result = asr.transcribe(audio_wav_path, language=project.source_language)
-        detected_lang = asr_result.get("detected_language", "en")
-        raw_segments = asr_result.get("segments", [])
+        update_job_stage(
+            db, job, "audio_extracted", 35.0,
+            "Audio ready (cached)" if is_audio_cached else "Audio extracted to 16kHz PCM WAV."
+        )
+
+        # --- Stage 3: Speech Recognition (ASR with Content Caching) ---
+        t0 = time.perf_counter()
+        asr_key = _build_transcription_key(fingerprint, settings.ASR_MODEL, project.source_language, beam_size)
+        cached_asr = get_cached_transcription(fingerprint, settings.ASR_MODEL, project.source_language, beam_size)
+
+        if cached_asr:
+            asr_result = cached_asr
+            detected_lang = asr_result.get("detected_language", "si")
+            raw_segments = asr_result.get("segments", [])
+            metrics["asr_ms"] = round((time.perf_counter() - t0) * 1000, 2)
+            metrics["asr_cached"] = True
+            update_job_stage(db, job, "speech_recognized", 65.0, f"Speech transcript restored from cache ({detected_lang}).")
+        else:
+            update_job_stage(db, job, "speech_recognition", 45.0, f"Running faster-whisper ({settings.ASR_MODEL}) on {settings.ASR_DEVICE}...")
+            asr = get_asr_service(
+                provider=settings.ASR_PROVIDER,
+                model_name=settings.ASR_MODEL,
+                device=settings.ASR_DEVICE,
+                compute_type=settings.ASR_COMPUTE_TYPE
+            )
+
+            asr_result = asr.transcribe(
+                audio_wav_path,
+                language=project.source_language,
+                beam_size=beam_size,
+                word_timestamps=word_timestamps
+            )
+            detected_lang = asr_result.get("detected_language", "si")
+            raw_segments = asr_result.get("segments", [])
+
+            # Persist to fast cache
+            set_cached_transcription(fingerprint, settings.ASR_MODEL, project.source_language, beam_size, asr_result)
+
+            metrics["asr_ms"] = round((time.perf_counter() - t0) * 1000, 2)
+            metrics["asr_cached"] = False
+            update_job_stage(db, job, "speech_recognized", 65.0, f"Speech recognized. Detected language: {detected_lang}.")
 
         project.detected_language = detected_lang
         db.commit()
@@ -85,25 +165,35 @@ def run_pipeline_for_project(
                 "words": []
             }]
 
-        update_job_stage(db, job, "speech_recognized", 60.0, f"Speech recognized. Detected language: {detected_lang}.")
+        # --- Stage 4: Subtitle Segmentation & Formatting ---
+        t0 = time.perf_counter()
+        update_job_stage(db, job, "segmenting_subtitles", 75.0, "Formatting and segmenting subtitle cues...")
 
-        # Stage 3: Subtitle Segmentation & Timing
-        update_job_stage(db, job, "segmenting_subtitles", 65.0, "Aligning timestamps and formatting subtitle cues...")
-        timed_cues = segment_transcription(
-            raw_segments=raw_segments,
-            max_chars_per_line=max_chars_per_line,
-            max_lines=max_lines
-        )
+        cached_cues = get_cached_cues(asr_key, max_chars_per_line, max_lines)
+        if cached_cues:
+            timed_cues = cached_cues
+        else:
+            timed_cues = segment_transcription(
+                raw_segments=raw_segments,
+                max_chars_per_line=max_chars_per_line,
+                max_lines=max_lines
+            )
+            set_cached_cues(asr_key, max_chars_per_line, max_lines, timed_cues)
 
-        update_job_stage(db, job, "segmented", 72.0, f"Generated {len(timed_cues)} subtitle cues.")
+        metrics["segmentation_ms"] = round((time.perf_counter() - t0) * 1000, 2)
+        update_job_stage(db, job, "segmented", 82.0, f"Generated {len(timed_cues)} formatted cues.")
 
-        # Stage 4: Sinhala Translation
-        update_job_stage(db, job, "translating", 78.0, "Translating text into natural Sinhala Unicode...")
+        # --- Stage 5: Sinhala Text Alignment / Direct Mapping ---
+        t0 = time.perf_counter()
+        update_job_stage(db, job, "translating", 88.0, "Synchronizing Sinhala text...")
         
-        # If source is already Sinhala, skip translation and use source_text
-        if detected_lang == "si" or project.source_language == "si":
+        # When source is Sinhala (or recognized as Sinhala), preserve text directly without expensive translation
+        is_sinhala = (detected_lang == "si" or project.source_language == "si" or project.target_language == "si" and detected_lang == "si")
+
+        if is_sinhala:
             for cue in timed_cues:
-                cue["sinhala_text"] = cue.get("source_text", "")
+                if not cue.get("sinhala_text"):
+                    cue["sinhala_text"] = cue.get("source_text", "")
         else:
             translator = get_translation_provider(settings.TRANSLATION_PROVIDER)
             timed_cues = translator.translate_segments(
@@ -114,15 +204,19 @@ def run_pipeline_for_project(
                 preserve_technical_terms=project.preserve_technical_terms
             )
 
-        update_job_stage(db, job, "translated", 92.0, "Sinhala translation completed.")
+        metrics["translation_ms"] = round((time.perf_counter() - t0) * 1000, 2)
+        update_job_stage(db, job, "translated", 93.0, "Sinhala text synchronization complete.")
 
-        # Stage 5: Database Persistence
-        update_job_stage(db, job, "saving_cues", 95.0, "Saving subtitle project to database...")
-        # Clear any existing cues for this project
+        # --- Stage 6: Database Persistence ---
+        t0 = time.perf_counter()
+        update_job_stage(db, job, "saving_cues", 96.0, "Saving subtitle cues to project...")
+
+        # Clear existing cues
         db.query(SubtitleCue).filter(SubtitleCue.project_id == project.id).delete()
 
-        for cue_data in timed_cues:
-            cue_model = SubtitleCue(
+        # Bulk insert
+        cue_objects = [
+            SubtitleCue(
                 project_id=project.id,
                 sequence_number=cue_data["sequence_number"],
                 start_time=cue_data["start_time"],
@@ -130,17 +224,33 @@ def run_pipeline_for_project(
                 source_text=cue_data.get("source_text", ""),
                 sinhala_text=cue_data.get("sinhala_text", cue_data.get("source_text", ""))
             )
-            db.add(cue_model)
+            for cue_data in timed_cues
+        ]
+        db.bulk_save_objects(cue_objects)
+        metrics["persistence_ms"] = round((time.perf_counter() - t0) * 1000, 2)
+
+        # Calculate final telemetry & Real-Time Factor (RTF)
+        t_total_sec = time.perf_counter() - t_start_total
+        metrics["total_processing_ms"] = round(t_total_sec * 1000, 2)
+        media_sec = max(project.media_duration, 0.001)
+        rtf = round(t_total_sec / media_sec, 4)
+        metrics["real_time_factor"] = rtf
+        metrics["speedup_factor"] = round(media_sec / max(t_total_sec, 0.0001), 1)
 
         project.status = "ready"
         job.status = "completed"
         job.current_stage = "completed"
         job.progress = 100.0
-        job.stage_message = f"Subtitles generated successfully ({len(timed_cues)} cues)."
+        job.timing_metrics = metrics
+        job.stage_message = f"Subtitles generated successfully ({len(timed_cues)} cues in {t_total_sec:.2f}s, {metrics['speedup_factor']}x RTF)."
         job.completed_at = datetime.now(timezone.utc)
         db.commit()
 
-        logger.info(f"Pipeline finished successfully for project {project_id}.")
+        logger.info(
+            f"Pipeline finished for project {project_id}: "
+            f"Total {t_total_sec:.2f}s | RTF {rtf:.4f} ({metrics['speedup_factor']}x real-time) | "
+            f"Cues: {len(timed_cues)} | ASR cached: {metrics['asr_cached']}"
+        )
         return job
 
     except Exception as e:

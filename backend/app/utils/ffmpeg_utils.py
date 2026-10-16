@@ -137,11 +137,23 @@ def generate_thumbnail(media_path: str, thumbnail_path: str, time_sec: float = 1
     return thumbnail_path if os.path.exists(thumbnail_path) else ""
 
 
-def extract_audio_to_wav(input_media_path: str, output_wav_path: str) -> str:
+def extract_audio_to_wav(input_media_path: str, output_wav_path: str, force_reextract: bool = False) -> str:
     """
     Extracts audio stream from input video/audio file into a standardized
     16kHz 16-bit mono PCM WAV file optimal for Whisper ASR.
+    Includes smart caching to skip redundant extraction if target WAV is fresh.
     """
+    # Check if existing audio file is fresh and non-empty
+    if not force_reextract and os.path.exists(output_wav_path) and os.path.getsize(output_wav_path) > 1024:
+        try:
+            in_mtime = os.path.getmtime(input_media_path)
+            out_mtime = os.path.getmtime(output_wav_path)
+            if out_mtime >= in_mtime:
+                logger.info(f"Reusing cached extracted audio: {output_wav_path}")
+                return output_wav_path
+        except Exception:
+            pass
+
     ffmpeg_exe = get_ffmpeg_binary()
     output_dir = os.path.dirname(output_wav_path)
     os.makedirs(output_dir, exist_ok=True)
@@ -149,6 +161,7 @@ def extract_audio_to_wav(input_media_path: str, output_wav_path: str) -> str:
     cmd = [
         ffmpeg_exe,
         "-y",
+        "-threads", "0",
         "-i", input_media_path,
         "-vn",
         "-acodec", "pcm_s16le",

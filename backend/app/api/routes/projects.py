@@ -1,8 +1,11 @@
 import os
 import shutil
 import uuid
+import logging
 from typing import List, Optional, Dict, Any
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -22,7 +25,7 @@ from app.services.video_render_service import render_timeline_project
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
-def run_pipeline_task(project_id: str, job_id: str, max_chars: int, max_lines: int):
+def run_pipeline_task(project_id: str, job_id: str, max_chars: int, max_lines: int, beam_size: int = 5, word_timestamps: bool = True):
     """Background task runner for ASR & Sinhala translation."""
     db = SessionLocal()
     try:
@@ -31,7 +34,9 @@ def run_pipeline_task(project_id: str, job_id: str, max_chars: int, max_lines: i
             project_id=project_id,
             job_id=job_id,
             max_chars_per_line=max_chars,
-            max_lines=max_lines
+            max_lines=max_lines,
+            beam_size=beam_size,
+            word_timestamps=word_timestamps
         )
     finally:
         db.close()
@@ -416,6 +421,16 @@ def generate_subtitles(
     if not project.stored_filename:
         raise HTTPException(status_code=400, detail="Cannot generate subtitles before uploading media.")
 
+    # Prevent duplicate concurrent jobs
+    active_job = db.query(ProcessingJob).filter(
+        ProcessingJob.project_id == project.id,
+        ProcessingJob.status.in_(["queued", "processing"])
+    ).order_by(desc(ProcessingJob.created_at)).first()
+
+    if active_job:
+        logger.info(f"Returning already active job {active_job.id} for project {project.id}")
+        return active_job
+
     if gen_request.source_language:
         project.source_language = gen_request.source_language
     if gen_request.target_language:
@@ -443,7 +458,9 @@ def generate_subtitles(
         project_id=project.id,
         job_id=job.id,
         max_chars=gen_request.max_chars_per_line or 42,
-        max_lines=gen_request.max_lines or 2
+        max_lines=gen_request.max_lines or 2,
+        beam_size=gen_request.beam_size if gen_request.beam_size is not None else 5,
+        word_timestamps=gen_request.word_timestamps if gen_request.word_timestamps is not None else True
     )
 
     return job

@@ -27,6 +27,10 @@ interface LeftSidebarProps {
   assets: MediaAsset[];
   cues: SubtitleCue[];
   isGeneratingSubtitles: boolean;
+  subtitlesJobStatus?: string;
+  subtitlesJobProgress?: number;
+  subtitlesJobMessage?: string;
+  subtitlesMetrics?: Record<string, any>;
   onUploadAsset: (file: File) => Promise<void>;
   onDeleteAsset: (assetId: string) => void;
   onAddAssetToTimeline: (asset: MediaAsset) => void;
@@ -40,6 +44,10 @@ export default function LeftSidebar({
   assets,
   cues,
   isGeneratingSubtitles,
+  subtitlesJobStatus,
+  subtitlesJobProgress = 0,
+  subtitlesJobMessage,
+  subtitlesMetrics,
   onUploadAsset,
   onDeleteAsset,
   onAddAssetToTimeline,
@@ -219,6 +227,43 @@ export default function LeftSidebar({
                 <p className="text-[11px] text-slate-400">
                   Transcribes spoken dialogue with faster-whisper and generates synchronized Sinhala Unicode subtitles.
                 </p>
+
+                {/* Live Processing Stage & Progress */}
+                {isGeneratingSubtitles && (
+                  <div className="mt-3 p-2.5 rounded-lg bg-surface/80 border border-indigo-500/30 space-y-1.5">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-indigo-300 font-medium truncate max-w-[150px]">
+                        {subtitlesJobMessage || 'Processing audio...'}
+                      </span>
+                      <span className="font-mono text-indigo-400 font-bold shrink-0">
+                        {Math.round(subtitlesJobProgress)}%
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        className="bg-indigo-500 h-1.5 rounded-full transition-all duration-300"
+                        style={{ width: `${Math.max(5, subtitlesJobProgress)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Telemetry Metrics on Completion */}
+                {!isGeneratingSubtitles && subtitlesMetrics && (
+                  <div className="mt-2.5 p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-[10px] space-y-1">
+                    <div className="flex items-center justify-between font-semibold text-emerald-300">
+                      <span>⚡ Generation Speed</span>
+                      <span>{subtitlesMetrics.speedup_factor || 1.0}x Real-Time</span>
+                    </div>
+                    <div className="flex items-center justify-between text-slate-400 font-mono text-[9px]">
+                      <span>Time: {(subtitlesMetrics.total_processing_ms / 1000).toFixed(2)}s (RTF {subtitlesMetrics.real_time_factor})</span>
+                      {subtitlesMetrics.asr_cached && (
+                        <span className="px-1 py-0.2 rounded bg-amber-500/20 text-amber-300 font-bold">CACHED</span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <button
                   type="button"
                   onClick={onGenerateSubtitles}
@@ -228,12 +273,12 @@ export default function LeftSidebar({
                   {isGeneratingSubtitles ? (
                     <>
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>Generating Subtitles...</span>
+                      <span>Processing...</span>
                     </>
                   ) : (
                     <>
                       <Sparkles className="w-3.5 h-3.5" />
-                      <span>Generate Subtitles</span>
+                      <span>{cues.length > 0 ? 'Regenerate Subtitles' : 'Generate Subtitles'}</span>
                     </>
                   )}
                 </button>

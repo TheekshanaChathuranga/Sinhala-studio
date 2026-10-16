@@ -19,6 +19,7 @@ storage/audio/*
 !storage/audio/.gitkeep
 storage/exports/*
 !storage/exports/.gitkeep
+storage/cache/
 storage/*.db
 storage/*.db-journal
 
