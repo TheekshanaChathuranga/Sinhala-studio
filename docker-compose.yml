@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: sinhala-subtitles-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_ENV=production
+      - API_PREFIX=/api/v1
+      - DATABASE_URL=sqlite:////storage/subtitles.db
+      - STORAGE_DIR=/storage
+      - ASR_PROVIDER=faster_whisper
+      - ASR_MODEL=tiny
+      - ASR_DEVICE=cpu
+      - ASR_COMPUTE_TYPE=int8
+      - TRANSLATION_PROVIDER=hybrid
+      - TRANSLATION_API_KEY=${TRANSLATION_API_KEY:-}
+      - TRANSLATION_MODEL=${TRANSLATION_MODEL:-gpt-4o-mini}
+      - MAX_UPLOAD_SIZE_MB=500
+      - MAX_MEDIA_DURATION_MINUTES=180
+    volumes:
+      - storage-data:/storage
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: sinhala-subtitles-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  storage-data:
+    driver: local

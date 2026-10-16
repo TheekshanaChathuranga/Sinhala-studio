@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# Next.js
+.next/
+out/
+build/
+dist/
+
+# Storage & Temporary Files
+storage/uploads/*
+!storage/uploads/.gitkeep
+storage/audio/*
+!storage/audio/.gitkeep
+storage/exports/*
+!storage/exports/.gitkeep
+storage/*.db
+storage/*.db-journal
+
+# Testing & Logs
+.pytest_cache/
+*.log
+.DS_Store
