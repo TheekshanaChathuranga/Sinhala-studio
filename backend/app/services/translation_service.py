@@ -4,6 +4,10 @@ import json
 import logging
 from typing import List, Dict, Any, Optional
 import httpx
+from app.services.singlish_transliterator import (
+    has_sinhala_unicode,
+    transliterate_singlish_to_sinhala
+)
 
 logger = logging.getLogger(__name__)
 
@@ -172,8 +176,11 @@ class LLMTranslationProvider(BaseTranslationProvider):
 
 class FreeMTTranslationProvider(BaseTranslationProvider):
     """
-    Translates using public machine translation API (MyMemory API)
-    with polite throttling and character limit handling.
+    Translates using public machine translation with automatic fallback:
+    1. Google Translate endpoint for natural phrasing
+    2. MyMemory API fallback
+    3. Rule-based Singlish phonetic transliteration for Pali/Sinhala romanized speech
+    Guarantees output is genuine Sinhala Unicode script.
     """
     def translate_segments(
         self,
@@ -184,10 +191,10 @@ class FreeMTTranslationProvider(BaseTranslationProvider):
         preserve_technical_terms: bool = True
     ) -> List[Dict[str, Any]]:
         output_segments = []
-        src = "en" if source_language in ("auto", None) else source_language
+        src = "auto" if source_language in ("auto", None) else source_language
         tgt = target_language or "si"
 
-        with httpx.Client(timeout=10.0) as client:
+        with httpx.Client(timeout=8.0) as client:
             for idx, seg in enumerate(segments, 1):
                 new_seg = dict(seg)
                 text = seg.get("source_text", "").strip()
@@ -196,25 +203,43 @@ class FreeMTTranslationProvider(BaseTranslationProvider):
                     output_segments.append(new_seg)
                     continue
 
+                translated_text = ""
+
+                # 1. Try Google Translate API (fast & highly accurate for Sinhala)
                 try:
-                    # MyMemory API
-                    url = f"https://api.mymemory.translated.net/get"
-                    params = {"q": text, "langpair": f"{src}|{tgt}"}
-                    resp = client.get(url, params=params)
+                    gt_url = "https://translate.googleapis.com/translate_a/single"
+                    params = {"client": "gtx", "sl": src, "tl": tgt, "dt": "t", "q": text}
+                    resp = client.get(gt_url, params=params)
                     if resp.status_code == 200:
                         data = resp.json()
-                        translated = data.get("responseData", {}).get("translatedText", "")
-                        # Validate that translation isn't an error message
-                        if "MYMEMORY WARNING" not in translated.upper():
-                            new_seg["sinhala_text"] = translated
-                        else:
-                            new_seg["sinhala_text"] = RuleBasedHeuristicTranslationProvider().translate_text(text)
-                    else:
-                        new_seg["sinhala_text"] = RuleBasedHeuristicTranslationProvider().translate_text(text)
+                        if data and isinstance(data, list) and len(data) > 0 and isinstance(data[0], list):
+                            pieces = [part[0] for part in data[0] if part and len(part) > 0 and part[0]]
+                            cand = "".join(pieces).strip()
+                            if has_sinhala_unicode(cand):
+                                translated_text = cand
                 except Exception as e:
-                    logger.warning(f"Free MT failed for '{text}': {e}. Using heuristic fallback.")
-                    new_seg["sinhala_text"] = RuleBasedHeuristicTranslationProvider().translate_text(text)
+                    logger.debug(f"Google MT failed for '{text}': {e}")
 
+                # 2. Try MyMemory API if Google did not produce Sinhala
+                if not translated_text:
+                    try:
+                        mm_url = "https://api.mymemory.translated.net/get"
+                        mm_params = {"q": text, "langpair": f"en|{tgt}"}
+                        resp = client.get(mm_url, params=mm_params)
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            cand = data.get("responseData", {}).get("translatedText", "")
+                            if "MYMEMORY WARNING" not in cand.upper() and has_sinhala_unicode(cand):
+                                translated_text = cand.strip()
+                    except Exception as e:
+                        logger.debug(f"MyMemory failed for '{text}': {e}")
+
+                # 3. If MT did not return Sinhala (common for romanized Pali/Singlish phonetics):
+                # Use phonetic Singlish transliteration to convert Roman characters directly to Sinhala Unicode!
+                if not translated_text or not has_sinhala_unicode(translated_text):
+                    translated_text = RuleBasedHeuristicTranslationProvider().translate_text(text)
+
+                new_seg["sinhala_text"] = translated_text
                 output_segments.append(new_seg)
 
         return output_segments
@@ -222,13 +247,13 @@ class FreeMTTranslationProvider(BaseTranslationProvider):
 
 class RuleBasedHeuristicTranslationProvider(BaseTranslationProvider):
     """
-    Offline dictionary and rule-based heuristic translation.
-    Ensures the system never breaks even without internet or API keys.
+    Offline dictionary and rule-based heuristic Singlish transliteration.
+    Ensures that any English / Singlish / Pali text is faithfully represented in genuine Sinhala Unicode.
     """
     def translate_text(self, text: str) -> str:
         cleaned = text.strip()
         lower = cleaned.lower().rstrip(".?!,")
-        
+
         # Check direct dictionary lookup
         if lower in OFFLINE_SINHALA_DICT:
             return OFFLINE_SINHALA_DICT[lower]
@@ -240,6 +265,11 @@ class RuleBasedHeuristicTranslationProvider(BaseTranslationProvider):
             w_lower = w.lower()
             if w_lower in OFFLINE_SINHALA_DICT:
                 translated_words.append(OFFLINE_SINHALA_DICT[w_lower])
+            elif has_sinhala_unicode(w):
+                translated_words.append(w)
+            elif re.match(r'^\w+$', w):
+                # Transliterate Singlish/Roman phonetics directly to Sinhala Unicode!
+                translated_words.append(transliterate_singlish_to_sinhala(w))
             else:
                 translated_words.append(w)
 

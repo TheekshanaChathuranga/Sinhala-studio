@@ -10,6 +10,7 @@ from app.utils.ffmpeg_utils import extract_audio_to_wav, extract_media_metadata
 from app.services.asr_service import get_asr_service
 from app.services.segmentation_service import segment_transcription
 from app.services.translation_service import get_translation_provider
+from app.services.singlish_transliterator import has_sinhala_unicode, transliterate_singlish_to_sinhala
 from app.services.transcription_cache import (
     compute_media_fingerprint,
     get_cached_transcription,
@@ -161,7 +162,7 @@ def run_pipeline_for_project(
             raw_segments = [{
                 "start": 0.0,
                 "end": max(project.media_duration, 2.0),
-                "text": "(No distinct speech detected)",
+                "text": "පැහැදිලි කථනයක් හඳුනා නොගැනිණි",
                 "words": []
             }]
 
@@ -187,14 +188,15 @@ def run_pipeline_for_project(
         t0 = time.perf_counter()
         update_job_stage(db, job, "translating", 88.0, "Synchronizing Sinhala text...")
         
-        # When source is Sinhala (or recognized as Sinhala), preserve text directly without expensive translation
-        is_sinhala = (detected_lang == "si" or project.source_language == "si" or project.target_language == "si" and detected_lang == "si")
+        # Check if transcribed cues already contain genuine Sinhala Unicode script
+        has_sinhala = any(has_sinhala_unicode(cue.get("source_text", "")) for cue in timed_cues)
 
-        if is_sinhala:
+        if has_sinhala and (detected_lang == "si" or project.source_language == "si"):
             for cue in timed_cues:
                 if not cue.get("sinhala_text"):
                     cue["sinhala_text"] = cue.get("source_text", "")
         else:
+            # Source text is in Latin/English characters (either foreign audio or romanized Singlish/Pali phonetics)
             translator = get_translation_provider(settings.TRANSLATION_PROVIDER)
             timed_cues = translator.translate_segments(
                 segments=timed_cues,
@@ -203,6 +205,11 @@ def run_pipeline_for_project(
                 style=project.translation_style,
                 preserve_technical_terms=project.preserve_technical_terms
             )
+            # Guarantee every cue has genuine Sinhala Unicode text
+            for cue in timed_cues:
+                st = cue.get("sinhala_text", "").strip()
+                if not st or not has_sinhala_unicode(st):
+                    cue["sinhala_text"] = transliterate_singlish_to_sinhala(cue.get("source_text", ""))
 
         metrics["translation_ms"] = round((time.perf_counter() - t0) * 1000, 2)
         update_job_stage(db, job, "translated", 93.0, "Sinhala text synchronization complete.")

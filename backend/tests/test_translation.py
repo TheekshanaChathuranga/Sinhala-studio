@@ -22,3 +22,19 @@ def test_mock_translation_provider():
     assert len(results) == 1
     assert "sinhala_text" in results[0]
     assert len(results[0]["sinhala_text"]) > 0
+
+
+def test_singlish_phonetic_transliteration():
+    from app.services.singlish_transliterator import transliterate_singlish_to_sinhala, has_sinhala_unicode
+    
+    assert has_sinhala_unicode("ආයුබෝවන්") is True
+    assert has_sinhala_unicode("Hello world") is False
+    
+    res1 = transliterate_singlish_to_sinhala("Hari sewan")
+    assert has_sinhala_unicode(res1) is True
+    assert "හරි" in res1
+    
+    res2 = transliterate_singlish_to_sinhala("Sadhu sadhu")
+    assert has_sinhala_unicode(res2) is True
+    assert "සාදු" in res2
+
