@@ -11,6 +11,7 @@ venv/
 out/
 build/
 dist/
+*.tsbuildinfo
 
 # Storage & Temporary Files
 storage/uploads/*
