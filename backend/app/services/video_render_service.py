@@ -126,8 +126,13 @@ def render_timeline_project(db: Session, export_id: str) -> ExportJob:
         # Build video filters:
         # Scale & pad to aspect ratio (letterboxing if needed)
         filter_parts = []
-        filter_parts.append(f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease")
-        filter_parts.append(f"pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:black")
+        fit_mode = styling.get("fit_mode", "contain")
+        if fit_mode == "cover":
+            filter_parts.append(f"scale={target_width}:{target_height}:force_original_aspect_ratio=increase")
+            filter_parts.append(f"crop={target_width}:{target_height}")
+        else:
+            filter_parts.append(f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease")
+            filter_parts.append(f"pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:black")
 
         if speed != 1.0 and speed > 0:
             setpts = 1.0 / speed
@@ -150,10 +155,11 @@ def render_timeline_project(db: Session, export_id: str) -> ExportJob:
                 val = float(fx.get("value", 1.0))
                 filter_parts.append(f"boxblur={val:.1f}:1")
 
-        # Add ASS subtitles filter
+        # Add ASS subtitles filter with local fonts and HarfBuzz complex shaping
         if has_subtitles and os.path.exists(temp_ass_path):
             escaped_ass = temp_ass_path.replace("\\", "/").replace(":", "\\:")
-            filter_parts.append(f"ass='{escaped_ass}'")
+            fonts_dir = str(settings.STORAGE_DIR / "fonts").replace("\\", "/").replace(":", "\\:")
+            filter_parts.append(f"ass='{escaped_ass}':fontsdir='{fonts_dir}':shaping=1")
 
         # Check for background music audio clip
         bg_audio_file = None

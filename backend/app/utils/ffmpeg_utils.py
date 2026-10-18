@@ -6,6 +6,7 @@ import subprocess
 import logging
 from pathlib import Path
 from typing import Dict, Any, Optional, List
+from app.services.singlish_transliterator import has_sinhala_unicode, transliterate_singlish_to_sinhala
 
 logger = logging.getLogger(__name__)
 
@@ -229,7 +230,10 @@ def generate_ass_subtitle_file(
     os.makedirs(os.path.dirname(output_ass_path), exist_ok=True)
 
     font_name = styling.get("font_name", "Noto Sans Sinhala")
-    font_size = int(styling.get("font_size", 28))
+    base_font_size = int(styling.get("font_size", 24))
+    font_size = max(24, int(base_font_size * (play_res_y / 720.0)))
+    margin_v = max(30, int(50 * (play_res_y / 1080.0)))
+    margin_lr = max(40, int(60 * (play_res_x / 1920.0)))
     text_color = styling.get("text_color", "#FFFFFF")
     outline_color = styling.get("outline_color", "#000000")
     outline_width = int(styling.get("outline_width", 2))
@@ -281,6 +285,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         text = getattr(cue, "sinhala_text", "") if not isinstance(cue, dict) else cue.get("sinhala_text", "")
         if not text:
             text = getattr(cue, "source_text", "") if not isinstance(cue, dict) else cue.get("source_text", "")
+
+        if text and not has_sinhala_unicode(text):
+            text = transliterate_singlish_to_sinhala(text)
 
         text_clean = text.strip().replace("\n", "\\N")
         start_ass = ms_to_ass_time(start_ms)
