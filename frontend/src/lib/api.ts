@@ -273,3 +273,14 @@ export function getMediaUrl(projectId: string): string {
 export function getExportDownloadUrl(exportId: string): string {
   return `${API_BASE}/exports/${exportId}/download`;
 }
+
+export async function convertProjectSubtitlesToSinhala(projectId: string): Promise<SubtitleCue[]> {
+  const res = await fetch(`${API_BASE}/projects/${projectId}/subtitles/convert-sinhala`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    throw new Error('Failed to convert subtitles to Sinhala script');
+  }
+  return res.json();
+}

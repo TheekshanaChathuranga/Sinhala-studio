@@ -139,7 +139,13 @@ export default function VideoExportModal({
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  {aspectRatio === '9:16' ? '1080 x 1920 (Vertical)' : '1920 x 1080 (Landscape)'}
+                  {aspectRatio === '9:16'
+                    ? '1080 x 1920 (Vertical)'
+                    : aspectRatio === '1:1'
+                    ? '1080 x 1080 (Square)'
+                    : aspectRatio === '4:5'
+                    ? '1080 x 1350 (Social Portrait)'
+                    : '1920 x 1080 (Landscape)'}
                 </p>
               </button>
 
@@ -159,7 +165,13 @@ export default function VideoExportModal({
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  {aspectRatio === '9:16' ? '720 x 1280 (Vertical)' : '1280 x 720 (Landscape)'}
+                  {aspectRatio === '9:16'
+                    ? '720 x 1280 (Vertical)'
+                    : aspectRatio === '1:1'
+                    ? '720 x 720 (Square)'
+                    : aspectRatio === '4:5'
+                    ? '720 x 900 (Social Portrait)'
+                    : '1280 x 720 (Landscape)'}
                 </p>
               </button>
             </div>

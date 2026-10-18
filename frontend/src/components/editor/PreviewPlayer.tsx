@@ -88,13 +88,15 @@ const PreviewPlayer = forwardRef<PreviewPlayerRef, PreviewPlayerProps>(
       onTimeUpdate(ms);
     };
 
-    // Aspect ratio container classes
-    const aspectClass = {
-      '16:9': 'aspect-video max-w-3xl',
-      '9:16': 'aspect-[9/16] max-h-[500px]',
-      '1:1': 'aspect-square max-h-[460px]',
-      '4:5': 'aspect-[4/5] max-h-[480px]',
-    }[aspectRatio] || 'aspect-video max-w-3xl';
+    // Canonical numeric aspect ratios
+    const numericRatio = {
+      '16:9': 16 / 9,
+      '9:16': 9 / 16,
+      '1:1': 1 / 1,
+      '4:5': 4 / 5,
+    }[aspectRatio] || (16 / 9);
+
+    const [fitMode, setFitMode] = useState<'contain' | 'cover'>('contain');
 
     // Subtitle position classes
     const subtitlePosClass = {
@@ -114,7 +116,14 @@ const PreviewPlayer = forwardRef<PreviewPlayerRef, PreviewPlayerProps>(
         {/* Canvas Monitor Box */}
         <div
           ref={containerRef}
-          className={`relative rounded-2xl overflow-hidden bg-black flex flex-col justify-center items-center shadow-2xl border border-border/80 transition-all duration-300 ${aspectClass} w-full`}
+          style={{
+            aspectRatio: `${numericRatio}`,
+            maxHeight: 'calc(100vh - 290px)',
+            maxWidth: `min(100%, calc((100vh - 290px) * ${numericRatio}))`,
+            width: '100%',
+            height: 'auto',
+          }}
+          className="relative rounded-2xl overflow-hidden bg-black flex flex-col justify-center items-center shadow-2xl border border-border/80 transition-all duration-300 mx-auto"
         >
           {mediaUrl ? (
             <video
@@ -123,7 +132,9 @@ const PreviewPlayer = forwardRef<PreviewPlayerRef, PreviewPlayerProps>(
               playsInline
               onTimeUpdate={handleVideoTimeUpdate}
               onClick={onTogglePlay}
-              className="w-full h-full object-contain cursor-pointer"
+              className={`w-full h-full cursor-pointer ${
+                fitMode === 'cover' ? 'object-cover' : 'object-contain'
+              }`}
             />
           ) : (
             <div className="w-full h-full flex flex-col items-center justify-center text-slate-600 gap-2">
@@ -167,7 +178,7 @@ const PreviewPlayer = forwardRef<PreviewPlayerRef, PreviewPlayerProps>(
               className={`absolute inset-x-4 pointer-events-none flex justify-center z-30 transition-all ${subtitlePosClass}`}
             >
               <div
-                className={`max-w-[90%] px-4 py-2 rounded-xl transition-all ${subtitleAlignClass}`}
+                className={`max-w-[92%] px-4 py-2 rounded-xl transition-all ${subtitleAlignClass}`}
                 style={{
                   backgroundColor:
                     subtitleStyling.background_opacity > 0
@@ -175,15 +186,27 @@ const PreviewPlayer = forwardRef<PreviewPlayerRef, PreviewPlayerProps>(
                       : 'transparent',
                   color: subtitleStyling.text_color,
                   fontSize: `${subtitleStyling.font_size}px`,
-                  fontFamily: subtitleStyling.font_name,
-                  lineHeight: 1.4,
+                  fontFamily: subtitleStyling.font_name
+                    ? `"${subtitleStyling.font_name}", var(--font-sinhala)`
+                    : 'var(--font-sinhala)',
+                  lineHeight: 1.5,
+                  whiteSpace: 'pre-wrap',
+                  overflowWrap: 'anywhere',
+                  wordBreak: 'break-word',
                   textShadow:
                     subtitleStyling.outline_width > 0
                       ? `0 0 ${subtitleStyling.outline_width * 2}px ${subtitleStyling.outline_color}, 0 2px 4px rgba(0,0,0,0.8)`
                       : '0 2px 4px rgba(0,0,0,0.9)',
                 }}
               >
-                <p className="whitespace-pre-line sinhala-text font-bold">
+                <p
+                  className="whitespace-pre-line sinhala-text font-bold"
+                  style={{
+                    fontFamily: subtitleStyling.font_name
+                      ? `"${subtitleStyling.font_name}", var(--font-sinhala)`
+                      : 'var(--font-sinhala)',
+                  }}
+                >
                   {activeSubtitle.sinhala_text || activeSubtitle.source_text}
                 </p>
               </div>
@@ -241,6 +264,23 @@ const PreviewPlayer = forwardRef<PreviewPlayerRef, PreviewPlayerProps>(
             </div>
 
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setFitMode(fitMode === 'contain' ? 'cover' : 'contain')}
+                className={`px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
+                  fitMode === 'cover'
+                    ? 'bg-indigo-600/40 border-indigo-500 text-indigo-300'
+                    : 'bg-surface-elevated border-border/60 text-slate-400 hover:text-white'
+                }`}
+                title={
+                  fitMode === 'cover'
+                    ? 'Canvas Fill: Cropped to ratio (Click to fit letterboxed)'
+                    : 'Canvas Fit: Entire video visible with black padding (Click to fill & crop)'
+                }
+              >
+                {fitMode === 'cover' ? 'Fill (Crop)' : 'Fit (Letterbox)'}
+              </button>
+
               <button
                 type="button"
                 onClick={() => setIsMuted(!isMuted)}

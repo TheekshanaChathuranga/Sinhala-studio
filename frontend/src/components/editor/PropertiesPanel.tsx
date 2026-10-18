@@ -22,6 +22,11 @@ import {
   TextOverlaySettings,
 } from '@/lib/types';
 import { SUBTITLE_PRESETS } from '@/lib/presets';
+import {
+  convertSinglishToSinhala,
+  hasSinhalaUnicode,
+  analyzeUnicodeCodePoints,
+} from '@/lib/sinhalaConverter';
 
 interface PropertiesPanelProps {
   selectedClip: TimelineClip | null;
@@ -78,10 +83,27 @@ export default function PropertiesPanel({
           <div className="space-y-4">
             {/* Selected Cue Text Quick Edit */}
             {selectedCue && (
-              <div className="space-y-1.5 p-2.5 rounded-xl bg-surface-elevated/70 border border-border/60">
-                <span className="text-[10px] font-bold uppercase text-indigo-400 block">
-                  Cue #{selectedCue.sequence_number} Text
-                </span>
+              <div className="space-y-2 p-3 rounded-xl bg-surface-elevated/70 border border-border/60">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase text-indigo-400 block">
+                    Cue #{selectedCue.sequence_number} Text
+                  </span>
+                  {/[a-zA-Z]/.test(selectedCue.sinhala_text || '') && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const converted = convertSinglishToSinhala(selectedCue.sinhala_text);
+                        onUpdateSelectedCue(selectedCue.id, converted);
+                      }}
+                      className="text-[10px] px-2 py-0.5 rounded bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 hover:bg-indigo-600 hover:text-white transition-all flex items-center gap-1 font-semibold"
+                      title="Convert Romanized / Singlish phonetics to genuine Sinhala Unicode script"
+                    >
+                      <Sparkles className="w-2.5 h-2.5" />
+                      <span>Convert to සිංහල</span>
+                    </button>
+                  )}
+                </div>
+
                 <textarea
                   rows={2}
                   value={selectedCue.sinhala_text}
@@ -89,6 +111,31 @@ export default function PropertiesPanel({
                   className="w-full p-2 text-xs rounded-lg bg-surface border border-border text-slate-100 sinhala-text focus:outline-none focus:border-indigo-500 resize-none leading-relaxed"
                   placeholder="සිංහල උපසිරැසි පෙළ..."
                 />
+
+                {/* Unicode Inspector Diagnostic Badge */}
+                {selectedCue.sinhala_text && (
+                  <div className="p-1.5 rounded-lg bg-surface/80 border border-border/40 text-[9px] font-mono text-slate-400">
+                    <div className="flex items-center justify-between mb-0.5">
+                      <span className="text-[9px] text-slate-500 font-bold uppercase">Unicode Diagnostic:</span>
+                      <span
+                        className={`px-1 py-0.2 rounded font-bold ${
+                          hasSinhalaUnicode(selectedCue.sinhala_text)
+                            ? 'text-emerald-400 bg-emerald-500/10'
+                            : 'text-amber-400 bg-amber-500/10'
+                        }`}
+                      >
+                        {hasSinhalaUnicode(selectedCue.sinhala_text) ? 'Sinhala Unicode (\u0D80-\u0DFF)' : 'Roman / Latin Script'}
+                      </span>
+                    </div>
+                    <p className="truncate text-slate-400 text-[9px]">
+                      {analyzeUnicodeCodePoints(selectedCue.sinhala_text)
+                        .slice(0, 10)
+                        .map((cp) => `${cp.char}: ${cp.codePoint}`)
+                        .join(' | ')}
+                      {selectedCue.sinhala_text.length > 10 ? ' ...' : ''}
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 
@@ -132,17 +179,37 @@ export default function PropertiesPanel({
             {/* Typography Controls */}
             <div className="space-y-3 pt-3 border-t border-border/50">
               <div>
-                <label className="text-slate-400 block mb-1">Font Family</label>
+                <label className="text-slate-400 block mb-1 font-semibold flex items-center justify-between">
+                  <span>Sinhala Font Family</span>
+                  <span className="text-[10px] text-indigo-400 font-mono">Google Fonts</span>
+                </label>
                 <select
                   value={subtitleStyling.font_name}
                   onChange={(e) => updateStyleField('font_name', e.target.value)}
-                  className="w-full px-2.5 py-1.5 rounded-lg bg-surface-elevated border border-border text-slate-200"
+                  className="w-full px-2.5 py-1.5 rounded-lg bg-surface-elevated border border-border text-slate-200 font-medium"
                 >
-                  <option value="Noto Sans Sinhala">Noto Sans Sinhala</option>
-                  <option value="Sinhala Sangam MN">Sinhala Sangam</option>
-                  <option value="Iskoola Pota">Iskoola Pota</option>
-                  <option value="Arial Unicode MS">Arial Unicode</option>
+                  <option value="Noto Sans Sinhala">Noto Sans Sinhala (නූතන සරල / Clean Sans)</option>
+                  <option value="Abhaya Libre">Abhaya Libre (අභය ලිබ්‍රේ / Elegant Serif)</option>
+                  <option value="Gemunu Libre">Gemunu Libre (ගැමුණු ලිබ්‍රේ / Modern Geometric)</option>
+                  <option value="Yaldevi">Yaldevi (යාල්දේවී / Contemporary Condensed)</option>
+                  <option value="Noto Serif Sinhala">Noto Serif Sinhala (සම්භාව්‍ය / Classical Serif)</option>
+                  <option value="Nirmala UI">Nirmala UI (Windows Sinhala)</option>
+                  <option value="Iskoola Pota">Iskoola Pota (සාම්ප්‍රදායික / Traditional)</option>
+                  <option value="sans-serif">System Sans-Serif</option>
                 </select>
+
+                {/* Live Font Sample Preview */}
+                <div
+                  className="mt-2 p-2.5 rounded-lg bg-surface/90 border border-indigo-500/30 text-center"
+                  style={{ fontFamily: subtitleStyling.font_name || 'Noto Sans Sinhala' }}
+                >
+                  <p className="text-sm font-semibold text-indigo-200">
+                    ආයුබෝවන් - නිවැරදි සිංහල උපසිරැසි
+                  </p>
+                  <p className="text-[10px] text-slate-400 font-mono mt-0.5">
+                    {subtitleStyling.font_name || 'Noto Sans Sinhala'} (Preview)
+                  </p>
+                </div>
               </div>
 
               <div>

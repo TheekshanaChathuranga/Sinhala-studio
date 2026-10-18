@@ -16,7 +16,9 @@ import {
   deleteProjectAsset,
   updateProjectTimeline,
   getMediaUrl,
+  convertProjectSubtitlesToSinhala,
 } from '@/lib/api';
+import { convertSinglishToSinhala } from '@/lib/sinhalaConverter';
 import {
   Project,
   SubtitleCue,
@@ -74,6 +76,7 @@ export default function SinhalaStudioEditorPage() {
   const [subtitlesMetrics, setSubtitlesMetrics] = useState<Record<string, any> | undefined>(undefined);
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved');
   const [isExportOpen, setIsExportOpen] = useState<boolean>(false);
+  const [isConvertingToSinhala, setIsConvertingToSinhala] = useState<boolean>(false);
 
   // Undo / Redo history stacks
   const [undoStack, setUndoStack] = useState<TimelineTrack[][]>([]);
@@ -442,6 +445,27 @@ export default function SinhalaStudioEditorPage() {
     }
   };
 
+  // Convert all cues to genuine Sinhala Unicode script
+  const handleConvertAllToSinhala = async () => {
+    setIsConvertingToSinhala(true);
+    try {
+      const updatedCues = await convertProjectSubtitlesToSinhala(projectId);
+      setCues(updatedCues);
+    } catch (err: any) {
+      console.warn('Backend conversion fallback to client Singlish converter:', err);
+      // Fallback: client-side conversion
+      const converted = cues.map((c) => {
+        const textToConvert = c.sinhala_text || c.source_text;
+        const si = convertSinglishToSinhala(textToConvert);
+        updateCue(projectId, c.id, { sinhala_text: si }).catch(() => {});
+        return { ...c, sinhala_text: si };
+      });
+      setCues(converted);
+    } finally {
+      setIsConvertingToSinhala(false);
+    }
+  };
+
   // Active items at current playhead
   const activeSubtitle = cues.find(
     (c) => currentTimeMs >= c.start_time && currentTimeMs <= c.end_time
@@ -523,6 +547,8 @@ export default function SinhalaStudioEditorPage() {
           onAddAssetToTimeline={handleAddAssetToTimeline}
           onAddTextPreset={handleAddTextPreset}
           onGenerateSubtitles={handleGenerateSubtitles}
+          onConvertAllToSinhala={handleConvertAllToSinhala}
+          isConvertingToSinhala={isConvertingToSinhala}
           onSelectCue={(cueId, timeMs) => {
             setSelectedCueId(cueId);
             setSelectedClipId(null);

@@ -16,10 +16,13 @@ import {
   FileAudio,
   Loader2,
   Clock,
+  Languages,
+  CheckCircle2,
 } from 'lucide-react';
 import { MediaAsset, SubtitleCue } from '@/lib/types';
 import { TEXT_OVERLAY_PRESETS } from '@/lib/presets';
 import { formatTimeShort } from '@/lib/utils';
+import { hasSinhalaUnicode } from '@/lib/sinhalaConverter';
 
 export type SidebarTab = 'media' | 'subtitles' | 'text' | 'audio' | 'effects';
 
@@ -36,6 +39,8 @@ interface LeftSidebarProps {
   onAddAssetToTimeline: (asset: MediaAsset) => void;
   onAddTextPreset: (presetId: string) => void;
   onGenerateSubtitles: () => void;
+  onConvertAllToSinhala?: () => Promise<void> | void;
+  isConvertingToSinhala?: boolean;
   onSelectCue: (cueId: string, timeMs: number) => void;
   onApplyEffect: (effectType: 'brightness' | 'contrast' | 'saturation' | 'blur', value: number) => void;
 }
@@ -53,6 +58,8 @@ export default function LeftSidebar({
   onAddAssetToTimeline,
   onAddTextPreset,
   onGenerateSubtitles,
+  onConvertAllToSinhala,
+  isConvertingToSinhala = false,
   onSelectCue,
   onApplyEffect,
 }: LeftSidebarProps) {
@@ -282,31 +289,69 @@ export default function LeftSidebar({
                     </>
                   )}
                 </button>
+
+                {cues.length > 0 && onConvertAllToSinhala && (
+                  <button
+                    type="button"
+                    onClick={onConvertAllToSinhala}
+                    disabled={isGeneratingSubtitles || isConvertingToSinhala}
+                    className="w-full mt-2 py-2 px-3 rounded-lg bg-gradient-to-r from-amber-500/20 via-orange-500/20 to-amber-500/20 hover:from-amber-500/30 hover:to-orange-500/30 text-amber-200 border border-amber-500/40 font-semibold text-xs flex items-center justify-center gap-1.5 transition-all disabled:opacity-50 shadow-sm"
+                    title="Converts all Roman/Singlish cues to genuine Sinhala Unicode script"
+                  >
+                    {isConvertingToSinhala ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-300" />
+                        <span>Converting to Sinhala...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Languages className="w-3.5 h-3.5 text-amber-300" />
+                        <span>Convert All to Sinhala (සිංහල අකුරට)</span>
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
 
               {/* Subtitle Cue List */}
               <div className="space-y-1.5 max-h-[420px] overflow-y-auto">
-                <span className="text-[10px] uppercase font-bold text-slate-500 block">
-                  Cues ({cues.length})
-                </span>
+                <div className="flex items-center justify-between text-[10px] uppercase font-bold text-slate-500">
+                  <span>Cues ({cues.length})</span>
+                  <span className="text-[9px] text-emerald-400 font-semibold normal-case flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                    සිංහල Unicode
+                  </span>
+                </div>
                 {cues.length === 0 ? (
                   <p className="text-xs text-slate-500 text-center py-4">No subtitles generated yet.</p>
                 ) : (
-                  cues.map((cue) => (
-                    <div
-                      key={cue.id}
-                      onClick={() => onSelectCue(cue.id, cue.start_time)}
-                      className="p-2 rounded-lg bg-surface-elevated border border-border/50 hover:border-indigo-500/60 cursor-pointer transition-colors text-left"
-                    >
-                      <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 mb-1">
-                        <span>#{cue.sequence_number}</span>
-                        <span>{formatTimeShort(cue.start_time)}</span>
+                  cues.map((cue) => {
+                    const textToDisplay = cue.sinhala_text || cue.source_text;
+                    const isSinhala = hasSinhalaUnicode(textToDisplay);
+                    return (
+                      <div
+                        key={cue.id}
+                        onClick={() => onSelectCue(cue.id, cue.start_time)}
+                        className="p-2 rounded-lg bg-surface-elevated border border-border/50 hover:border-indigo-500/60 cursor-pointer transition-colors text-left"
+                      >
+                        <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 mb-1">
+                          <span className="flex items-center gap-1.5">
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full ${isSinhala ? 'bg-emerald-400' : 'bg-amber-400'}`}
+                              title={isSinhala ? 'Sinhala Unicode Script' : 'Roman / Singlish'}
+                            />
+                            <span>#{cue.sequence_number}</span>
+                          </span>
+                          <span className="text-[9px] px-1 py-0.2 rounded bg-surface text-slate-400 font-mono">
+                            {formatTimeShort(cue.start_time)}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-200 sinhala-text line-clamp-2">
+                          {textToDisplay}
+                        </p>
                       </div>
-                      <p className="text-xs text-slate-200 sinhala-text line-clamp-2">
-                        {cue.sinhala_text || cue.source_text}
-                      </p>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>

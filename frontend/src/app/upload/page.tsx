@@ -28,7 +28,7 @@ export default function UploadPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [projectTitle, setProjectTitle] = useState<string>('');
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('16:9');
-  const [sourceLanguage, setSourceLanguage] = useState<string>('auto');
+  const [sourceLanguage, setSourceLanguage] = useState<string>('si');
   const [translationStyle, setTranslationStyle] = useState<string>('conversational');
   const [preserveTechTerms, setPreserveTechTerms] = useState<boolean>(true);
   const [generateSubtitlesNow, setGenerateSubtitlesNow] = useState<boolean>(true);
@@ -240,9 +240,9 @@ export default function UploadPage() {
                 onChange={(e) => setSourceLanguage(e.target.value)}
                 className="w-full px-3 py-2 rounded-xl bg-surface-elevated border border-border text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
               >
+                <option value="si">Sinhala (සිංහල) - Recommended</option>
                 <option value="auto">Auto-Detect Language</option>
                 <option value="en">English</option>
-                <option value="si">Sinhala (සිංහල)</option>
                 <option value="hi">Hindi (हिन्दी)</option>
                 <option value="ta">Tamil (தமிழ்)</option>
               </select>
